@@ -1,0 +1,372 @@
+#include <Arduino.h>
+//#include <SoftwareSerial.h>
+#include <Keypad.h>
+#include <Password.h>
+#include <FPS_GT511C3.h>
+#include <Servo.h>
+
+/*
+Pin setup:
+2-8 Matrix Keypad
+9 Servo
+10, 11 Fingerprint Scanner
+12 Spy Camera
+A1 Buzzer
+*/
+
+const byte rows = 4; //four rows
+const byte cols = 3; //three columns
+char keys[rows][cols] = {
+  {'1','2','3'},
+  {'4','5','6'},
+  {'7','8','9'},
+  {'*','0','#'}
+};
+byte rowPins[rows] = {8, 7, 6, 5}; //connect to the row pinouts of the keypad
+byte colPins[cols] = {4, 3, 2}; //connect to the column pinouts of the keypad
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, rows, cols );
+Password password = Password("1030");
+FPS_GT511C3 fps(10, 11); //voltage divider for second pin
+Servo servo;
+
+int num = 0;
+bool mode = false;
+int cam = 0;
+
+void setup() {
+  //Serial.begin(9600);
+  /*servo.attach(9);
+  servo.write(pos1);
+  delay(1000);
+  servo.detach();*/
+  servo.attach(9);
+  if(servo.read() != 0){
+    servo.write(0);
+  }
+  delay(1500);
+  servo.detach();
+  pinMode(A1, OUTPUT);
+}
+
+void loop() {
+start:
+//Serial.print("cam");
+//Serial.println(cam);
+
+  if (cam >= 5){
+  pinMode(12,OUTPUT);
+  digitalWrite(12,LOW);
+  delay(300);
+  digitalWrite(12,HIGH);
+  //Serial.print("picture taken");
+  cam = 0;
+  }
+
+  while (mode == false){
+    char key = keypad.getKey();
+    if (key){
+      passwordcount(key);
+      if (num == 4){
+        passwordcheck();
+        if (password.evaluate() == true){
+          //Serial.print("Correct password");
+          password.reset();
+          cam = 0;
+          //Serial.print("cam");
+          //Serial.println(cam);
+          tone(A1,8000);
+          delay(200);
+          noTone(A1);
+          fps.Open();
+          fps.SetLED(true);
+          //Serial.print("press finger");
+          delay(5000);
+          if (fps.IsPressFinger() == true){
+            fps.CaptureFinger(false);
+            int id = fps.Identify1_N();
+            if (id <200){
+              tone(A1,4000);
+              delay(200);
+              noTone(A1);
+              delay(100);
+              tone(A1,4000);
+              delay(200);
+              noTone(A1);
+              delay(100);
+              tone(A1,4000);
+              delay(200);
+              noTone(A1);
+              servo.attach(9);
+              //Serial.print("Verified ID:");
+              //Serial.println(id);
+              servo.write(180);
+              delay(1500);
+              servo.detach();
+              fps.SetLED(false);
+              fps.Close();
+              delay(1000);
+              //servo.detach();
+            }
+            else{
+              //Serial.print("Finger not found");
+              exit();
+              goto start;
+            }
+          }
+          else{
+            //Serial.print("No finger detected");
+            exit();
+            goto start;
+          }
+        }
+        else{
+          //Serial.print("Wrong password");
+          password.reset();
+          tone(A1,100);
+          delay(300);
+          noTone(A1);
+          delay(50);
+          tone(A1,100);
+          delay(300);
+          noTone(A1);
+          delay(50);
+          tone(A1,100);
+          delay(300);
+          noTone(A1);
+          cam++;
+          //Serial.print("cam");
+          //Serial.println(cam);
+          goto start;
+        }
+      }
+    }
+    if (key == '#'){
+      servo.attach(9);
+      reset();
+      if (servo.read() != 0){
+        servo.write(0);
+      }
+      delay(1500);
+      servo.detach();
+    }
+    if (key == '*'){
+      tone(A1,4500);
+      delay(200);
+      tone(A1,4000);
+      delay(200);
+      noTone(A1);
+      password.reset();
+      num = 0;
+      mode = true;
+      fps.SetLED(false);
+      //Serial.print("enrolling fingerprint");
+      //Serial.println(mode);
+    }
+  }
+  
+  while (mode == true){
+    char key = keypad.getKey();
+    if (key){
+      passwordcount(key);
+      if (num == 4){
+        passwordcheck();
+        if (password.evaluate() == true){
+          bool check = true;
+          //Serial.print("Correct password");
+          password.reset();
+          cam = 0;
+          //Serial.print("cam");
+          //Serial.println(cam);
+          tone(A1,8000);
+          delay(200);
+          noTone(A1);
+          fps.Open();
+          fps.SetLED(true);
+          int enrollid = 0;
+          while (check == true){
+            //Serial.print("checking");
+            //Serial.println(enrollid);
+            bool okid = fps.CheckEnrolled(enrollid);
+            if (okid == true) enrollid++;
+            if (enrollid > 199){
+              //Serial.print("Database full");
+              goto start;
+            }
+            if (okid == false){
+              //Serial.print("mode ");
+              //Serial.println(mode);
+              bool check = false;
+              fps.EnrollStart(enrollid);
+              fps.SetLED(true);
+              //Serial.print("slot available ");
+              //Serial.print("Press finger to Enroll # ");
+              //Serial.println(enrollid);
+              delay(6000);
+              if(fps.IsPressFinger() == true){
+                bool bret = fps.CaptureFinger(true);
+                int iret = 0;
+                if (bret != false){
+                  fps.SetLED(false);
+                  //Serial.println("Remove finger");
+                  delay(3000);
+                  fps.Enroll1(); 
+                  if(fps.IsPressFinger() == false){
+                    fps.SetLED(true);
+                    //Serial.println("Press same finger again");
+                    delay(3000);
+                    if(fps.IsPressFinger() == true){
+                      bret = fps.CaptureFinger(true);
+                      if (bret != false){
+                        fps.SetLED(false);
+                        //Serial.println("Remove finger");
+                        delay(3000);
+                        fps.Enroll2();
+                        if(fps.IsPressFinger() == false){
+                          fps.SetLED(true);
+                          //Serial.println("Press same finger yet again");
+                          delay(3000);
+                          if(fps.IsPressFinger() == true){
+                            bret = fps.CaptureFinger(true);
+                            if (bret != false){
+                              fps.SetLED(false);
+                              //Serial.println("Remove finger");
+                              delay(3000);
+                              iret = fps.Enroll3();
+                              if (iret == 0){
+                                //Serial.print("Enrolling Successfull");
+                                //Serial.println(enrollid);
+                                tone(A1,4000);
+                                delay(200);
+                                noTone(A1);
+                                delay(100);
+                                tone(A1,4000);
+                                delay(200);
+                                noTone(A1);
+                                delay(100);
+                                tone(A1,4000);
+                                delay(200);
+                                noTone(A1);
+                                mode = false;
+                                goto start;
+                              }
+                              else{
+                                //Serial.print("Enrolling Failed with error code:");
+                                //Serial.println(iret);
+                                exit();
+                                goto start;
+                              }
+                            }
+                            else{
+                              //Serial.println("Enroll 2 failed");
+                              exit();
+                              goto start;
+                            }
+                          }
+                          else{
+                            //Serial.println("Enroll 2 failed");
+                            exit();
+                            goto start;
+                          }
+                        }
+                        else{
+                          //Serial.println("Enroll 2 failed");
+                          exit();
+                          goto start;
+                        }
+                      }
+                      else{
+                        //Serial.print("Enroll 1 failed");
+                        exit();
+                        goto start;
+                      }
+                    }
+                    else{
+                      //Serial.print("Enroll 1 failed");
+                      exit();
+                      goto start;
+                    }
+                  }
+                  else{
+                    //Serial.print("Enroll 1 failed");
+                    exit();
+                    goto start;
+                  }
+                }
+                else{
+                  //Serial.print("Detection failed");
+                  exit();
+                  goto start;
+                }
+              }
+              else{
+                //Serial.print("No finger detected");
+                exit();
+                goto start;
+              }
+            }
+          }
+        }
+        else{
+          //Serial.print("Wrong password");
+          tone(A1,100);
+          delay(300);
+          noTone(A1);
+          delay(50);
+          tone(A1,100);
+          delay(300);
+          noTone(A1);
+          delay(50);
+          tone(A1,100);
+          delay(300);
+          noTone(A1);
+          fps.SetLED(false);
+          exit();
+          password.reset();
+          cam++;
+          //Serial.print("cam");
+          //Serial.println(cam);
+          goto start;
+        }
+      }
+    }
+    if (key == '#'){
+      reset();
+      mode = false;
+      //Serial.println(mode);
+      goto start;
+    }
+  }
+}
+
+void passwordcount(char key) {
+  //Serial.println(key);
+  password.append(key);
+  num++;
+  //Serial.println(num);
+}
+
+void passwordcheck() {
+  num = 0;
+  //Serial.print("Evaluating password");
+  password.evaluate();
+}
+
+void reset() {
+  //Serial.print("reset");
+  password.reset();
+  num = 0;
+  fps.SetLED(false);
+  fps.Close();
+  tone(A1,6000);
+  delay(200);
+  noTone(A1);
+}
+
+void exit() {
+  fps.SetLED(false);
+  fps.Close();
+  tone(A1,100);
+  delay(300);
+  noTone(A1);
+  mode = false;
+}
